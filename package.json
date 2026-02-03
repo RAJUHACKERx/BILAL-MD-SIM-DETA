@@ -1,0 +1,21 @@
+{
+  "name": "sim-db-bot",
+  "version": "1.1.0",
+  "description": "WhatsApp SIM Database Bot with Pairing Code",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "Zain Ali",
+  "license": "ISC",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.6.0",
+    "axios": "^1.6.0",
+    "pino": "^8.16.0",
+    "fs-extra": "^11.1.1",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "engines": {
+    "node": ">=18.x"
+  }
+}
