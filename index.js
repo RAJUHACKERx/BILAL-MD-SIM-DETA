@@ -11,6 +11,7 @@ const fs = require("fs-extra");
 const config = require("./config");
 
 async function startBot() {
+  // Panel par session folder hamesha save rehta hai
   const { state, saveCreds } = await useMultiFileAuthState("./session");
   const { version } = await fetchLatestBaileysVersion();
 
@@ -25,106 +26,78 @@ async function startBot() {
     browser: ["Ubuntu", "Chrome", "20.0.04"]
   });
 
-  // 🔑 PAIRING CODE LOGIC
+  // Owner Pairing (Jab aap pehli bar bot start karenge)
   if (!sock.authState.creds.registered) {
-    console.log("⏳ Pairing code request ho raha hai...");
+    console.log("⏳ Waiting for Pairing Code...");
     setTimeout(async () => {
       try {
         const code = await sock.requestPairingCode(config.phoneNumber);
-        console.log(`\n🔗 APKA PAIR CODE: ${code}\n`);
+        console.log(`\n🔗 OWNER PAIR CODE: ${code}\n`);
       } catch (err) {
-        console.log("Pairing Code Error:", err.message);
+        console.log("Pairing Error:", err.message);
       }
     }, 6000);
   }
 
   sock.ev.on("creds.update", saveCreds);
 
-  // 🔄 CONNECTION UPDATE (WITH AUTO-RESTART)
   sock.ev.on("connection.update", ({ connection, lastDisconnect }) => {
     if (connection === "close") {
       const shouldRestart = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log("🔄 Connection closed. Restarting: ", shouldRestart);
       if (shouldRestart) {
-        setTimeout(() => startBot(), 5000); 
+        setTimeout(() => startBot(), 5000);
       }
     } else if (connection === "open") {
-      console.log(`✅ SIM DATABASE BOT CONNECTED BY ${config.ownerName.toUpperCase()}`);
+      console.log(`✅ MINI BOT ACTIVE ON PANEL - OWNER: ${config.ownerName}`);
     }
   });
 
-  // 🛡️ ANTI-IDLE (Heroku Awake Feature)
-  setInterval(() => {
-    console.log("🛡️ Anti-Idle: Bot is active and running...");
-  }, 10 * 60 * 1000);
-
-  // 📩 MESSAGE HANDLING (.find Command)
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== 'notify') return;
-    
-    try {
-      const msg = messages[0];
-      if (!msg.message || msg.key.fromMe) return;
+    const msg = messages[0];
+    if (!msg.message || msg.key.fromMe) return;
 
-      const from = msg.key.remoteJid;
-      const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-      
-      // ✅ COMMAND CHECK: Sirf .find par respond karega
-      if (!text.toLowerCase().startsWith(".find")) return;
+    const from = msg.key.remoteJid;
+    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
 
-      const query = text.split(" ")[1]?.replace(/\D/g, ""); // Number ya CNIC nikalne ke liye
-
-      if (!query || query.length < 10) {
-        return sock.sendMessage(from, {
-          text: `*⚠️ Usage:* .find 03XXXXXXXXX\n*Example:* .find 03038264337`
-        });
+    // 🛠️ COMMAND 1: User Pairing (.pair)
+    if (text.toLowerCase().startsWith(".pair")) {
+      const target = text.split(" ")[1]?.replace(/\D/g, "");
+      if (!target || target.length < 10) {
+        return sock.sendMessage(from, { text: "❌ Usage: .pair 923XXXXXXXXX" });
       }
 
-      let queryType = query.length === 13 ? "CNIC" : "Phone Number";
-      await sock.sendMessage(from, { text: "🔎 *Searching SIM Database...* ⏳" });
-
-      // 🔎 API CALLING
-      const api = `https://rai-ammar-kharal-sim-database-api.vercel.app/api/lookup?query=${query}`;
-      
+      await sock.sendMessage(from, { text: `⏳ Generating Pairing Code for ${target}...` });
       try {
-        const res = await axios.get(api);
+        // Isse user ko unka code mil jayega
+        const userCode = await sock.requestPairingCode(target);
+        await sock.sendMessage(from, { 
+          text: `✅ *YOUR PAIRING CODE:* ${userCode}\n\n1. WhatsApp Settings kholen.\n2. Linked Devices par jayen.\n3. Link with Phone Number chunein.\n4. Ye code enter karein.` 
+        });
+      } catch (e) {
+        await sock.sendMessage(from, { text: "⚠️ Error generating code." });
+      }
+    }
+
+    // 🛠️ COMMAND 2: SIM Database (.find)
+    if (text.toLowerCase().startsWith(".find")) {
+      const query = text.split(" ")[1]?.replace(/\D/g, "");
+      if (!query || query.length < 10) return;
+
+      await sock.sendMessage(from, { text: "🔎 Searching Database..." });
+      try {
+        const res = await axios.get(`https://rai-ammar-kharal-sim-database-api.vercel.app/api/lookup?query=03018787786${query}`);
         const d = res.data;
 
-        if (!d || (!d.name && !d.cnic)) {
-          return sock.sendMessage(from, {
-            text: `❌ *NO DATA FOUND*\n\n🔍 *Query:* ${query}\n📌 *Type:* ${queryType}\n\n🔥 *Powered by ${config.ownerName}*`
-          });
-        }
+        if (!d || !d.name) return sock.sendMessage(from, { text: "❌ Record Not Found." });
 
-        // ✅ RESULT UI
-        const result = `
-╔══════════════════════════════╗
-   ✅  *SIM DATABASE RESULTS*
-╚══════════════════════════════╝
-
-📌 *Type:* ${queryType}
-📞 *Query:* ${query}
-
-╭──────────────────────────────╮
-│ 👤 *Name* : ${d.name || "N/A"}
-│ 📱 *Number* : ${d.number || query}
-│ 🆔 *CNIC* : ${d.cnic || "N/A"}
-│ 🏠 *Address* :
-│   ${d.address || "N/A"}
-╰──────────────────────────────╯
-
-🔥 *Powered by ${config.ownerName}*`;
-
+        const result = `╔══════════════════╗\n  ✅ SIM RESULTS\n╚══════════════════╝\n👤 *Name* : ${d.name}\n📱 *Number* : ${d.number}\n🆔 *CNIC* : ${d.cnic}\n🏠 *Address* : ${d.address}\n\n🔥 *Powered by ${config.im bilal king 👑}*`;
         await sock.sendMessage(from, { text: result });
       } catch (e) {
-        await sock.sendMessage(from, { text: "⚠️ Server response error. Try again later." });
+        await sock.sendMessage(from, { text: "⚠️ API Error." });
       }
-    } catch (err) {
-      console.log("ERROR:", err);
     }
   });
 }
 
-// Start the bot
 startBot();
-        
